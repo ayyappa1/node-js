@@ -1,0 +1,67 @@
+
+#!/usr/local/bin/groovy
+
+pipeline {
+  agent {
+    label 'jenkins-agent'
+  }
+  parameters {
+    choice(choices: "eu-west-1\nus-east-1", description: 'Which AWS region?', name: 'aws_region')
+    choice(choices: "UA\nCM\nLH\nBA", description: 'What Service Name?', name: 'service_name')
+    string(defaultValue: 'latest', description: 'Application version? Set to latest by default.', name: 'app_version')
+    string(defaultValue: 'develop', description: 'Branch?', name: 'git_branch')
+  }
+  stages {
+  	
+	stage('SCM Checkout'){
+		// Clone repo
+		git branch: 'master', 
+		credentialsId: 'github', 
+		url: 'https://github.com/ayyappa1/node-js'
+	   
+	   }
+
+    stage('set variables') {
+      steps {
+        timestamps {
+          script {
+            env.AWS_REGION = "${params.aws_region}"
+            env.SERVICE_NAME = "${params.service_name}"
+            env.APP_VERSION = "${params.app_version}"
+            env.GIT_BRANCH = "${params.git_branch}"
+          }
+        }
+      }
+    }
+    stage('set build label') {
+      steps {
+        script {
+          currentBuild.displayName = "#${env.BUILD_NUMBER} [${env.GIT_BRANCH}] (${env.SERVICE_NAME})"
+        }
+      }
+    }
+    stage('packer build') {
+      steps {
+        timestamps {
+          script {
+            echo 'Starting image build...'
+            sh "cd packer && ./packwrap.sh build -a ${env.AWS_REGION} -s ${env.SERVICE_NAME} -v ${env.APP_VERSION} -u jenkins -g ${env.GIT_BRANCH}"
+            env.AMI_ID = sh (script: "cd packer/post-processors && cat manifest.json | jq -r '.builds | last | .artifact_id | split(\":\") | last'", returnStdout: true).trim()
+            echo """
+
+            AMI info
+            --------
+            AMI ID: ${env.AMI_ID}
+            AWS Region: ${env.AWS_REGION}
+            App Version: ${env.APP_VERSION}
+            Build User: jenkins
+            Git Branch: ${env.GIT_BRANCH}
+
+            """
+
+          }
+        }
+      }
+    }
+  }
+}
