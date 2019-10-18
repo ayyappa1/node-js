@@ -1,0 +1,58 @@
+#!/usr/local/bin/groovy
+
+pipeline {
+  agent {
+    label 'jenkins-agent'
+  }
+
+  stages {
+    stage('setup variables') {
+      steps {
+        timestamps {
+          script {
+            echo 'setting up variables'
+			Server_list = [ UA-web,LH-web]
+            AWS_REGION = "eu-west-1"
+            ENV_TYPE = "dev"
+            SERVICE_NAME = "UA"
+            ASG_COUNT = "0"
+            ASG_MAXSIZE = "1"
+          }
+        }
+      }
+    }
+    stage('get and update ASG count') {
+      steps {
+        timestamps {
+          script {
+            echo "get and update ASG count ${ENV_TYPE}"
+            run_ansible_script(Server_list)
+          }
+        }
+      }
+    }
+  }
+}
+
+def run_ansible_script(list) {
+  for (int Server_list = 0; Server_list < list.size(); Server_list++) {
+  sh "echo Run Ansible to update ASG for Server_list: ${list[Server_list]}"
+      echo 'Starting ansible to increase the number of instances in ASG group...'
+      if ( "${list[Server_list]}" == "UA-web") {
+        ASG_COUNT = 3 
+        env.ENVIRONMENT = "dev"
+        ASG_MAXSIZE = "3"
+        echo "Server_list: ${list[Server_list]}"
+        echo "ASG_COUNT: ${ASG_COUNT}"
+        } else if ( "${list[Server_list]}" == "LH-web") {
+        ASG_COUNT = 1 
+        env.ENVIRONMENT = "dev"
+        ASG_MAXSIZE = "1"
+        echo "Server_list: ${list[Server_list]}"
+        echo "ASG_COUNT: ${ASG_COUNT}"
+        } 
+      sshagent (credentials: ['jenkins-git-ssh-key']) {
+      sh "cd ansible && ansible-playbook playbooks/update_asg.yml -e 'host_key_checking=False' -e \"aws_region=${AWS_REGION}\" -e \"Server_list=${list[Server_list]}\" -e \"env_name=${ENVIRONMENT}\" -e \"env_type=${ENV_TYPE}\" -e \"service_name=${SERVICE_NAME}\" -e \"asg_count=${ASG_COUNT}\" -e \"asg_maxsize=${ASG_MAXSIZE}\" -e \"ssh_user=jenkins\" -e \"mfa_token=\" -vv "
+    }
+  }
+}
