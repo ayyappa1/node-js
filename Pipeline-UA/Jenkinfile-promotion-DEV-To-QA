@@ -1,0 +1,101 @@
+
+#!/usr/local/bin/groovy
+
+pipeline {
+ agent { label 'master' }
+ parameters {
+   booleanParam(defaultValue: true, description: 'Promote AMI From Dev', name: 'promote_AMI')
+   string(defaultValue: 'develop', description: 'Git Branch?', name: 'infra_git_branch')
+   string(defaultValue: '', description: 'Git Tag?', name: 'infra_git_tag')
+ }
+ stages {
+   stage('set build label') {
+     steps {
+       script {
+         currentBuild.displayName = "#${env.BUILD_NUMBER} ${params.infra_git_branch} ${params.infra_git_tag}"
+       }
+     }
+   }
+   stage('set variables') {
+     steps {
+       timestamps {
+         script {
+           echo 'starting set up variables'
+           env.INFRA_GIT_BRANCH = "${params.infra_git_branch}"
+           env.INFRA_GIT_TAG = "${params.infra_git_tag}"
+
+           env.SOURCE_AWS_REGION = "eu-west-1"
+           env.SOURCE_ENV_NAME = "UA"
+           env.SOURCE_ENV_TYPE = "dev"
+
+           env.DESTINATION_AWS_REGION = "us-east-1"
+           env.DESTINATION_ENV_NAME = "UA"
+           env.DESTINATION_ENV_TYPE = "Stg"
+
+         }
+       }
+     }
+	 }
+   
+   stage('get existing ami_ids') {
+     steps {
+       timestamps {
+         script {
+           env.GET_AMIS_NUMBER = build (job: 'Tasks/Get-AMIs', wait: true, parameters: [
+             [$class: 'StringParameterValue', name: 'aws_region', value: "${env.DESTINATION_AWS_REGION}"],
+             [$class: 'StringParameterValue', name: 'service_name', value: "${DESTINATION_SERVICE_NAME}"],
+             [$class: 'StringParameterValue', name: 'environment', value: "${env.DESTINATION_ENV_NAME}"],
+             [$class: 'StringParameterValue', name: 'env_type', value: "${env.DESTINATION_ENV_TYPE}"],
+             [$class: 'StringParameterValue', name: 'service_id', value: "${env.DESTINATION_SERVICE_ID}"],
+             [$class: 'StringParameterValue', name: 'infra_git_branch', value: "${env.INFRA_GIT_BRANCH}"],
+           ]).number
+		   }
+		  }
+		 }
+		}
+		   
+		   
+  stage('promote') {
+     steps {
+           timestamps {
+             script {
+               env.PROMOTE_UA_NUMBER = build (job: "Tasks/Promote-AMI", wait: true, parameters: [
+                 [$class: 'StringParameterValue', name: 'source_aws_region', value: "${env.SOURCE_AWS_REGION}"],
+                 [$class: 'StringParameterValue', name: 'source_env_name', value: "${env.SOURCE_ENV_NAME}"],
+                 [$class: 'StringParameterValue', name: 'source_env_type', value: "${env.SOURCE_ENV_TYPE}"],
+                 [$class: 'StringParameterValue', name: 'source_service_name', value: "${env.SOURCE_SERVICE_NAME}"],
+
+				 
+                 [$class: 'StringParameterValue', name: 'destination_aws_region', value: "${env.DESTINATION_AWS_REGION}"],
+                 [$class: 'StringParameterValue', name: 'destination_env_name', value: "${env.DESTINATION_ENV_NAME}"],
+                 [$class: 'StringParameterValue', name: 'destination_env_type', value: "${env.DESTINATION_ENV_TYPE}"],
+                 [$class: 'StringParameterValue', name: 'destination_service_name', value: "${env.DESTINATION_SERVICE_NAME}"],
+
+                 [$class: 'StringParameterValue', name: 'infra_git_branch', value: "${env.INFRA_GIT_BRANCH}"],
+               ]).number
+             }
+           }
+         }
+       }
+	   
+	stage('deploy') {
+     steps {
+       timestamps {
+         script {
+           env.BUILD_SERVICE_NUMBER = build (job: 'Tasks/Build-Service', wait: true, parameters: [
+             [$class: 'StringParameterValue', name: 'aws_region', value: "${env.DESTINATION_AWS_REGION}"],
+             [$class: 'StringParameterValue', name: 'env_type', value: "${env.DESTINATION_ENV_TYPE}"],
+             [$class: 'StringParameterValue', name: 'environment', value: "${env.DESTINATION_ENV_NAME}"],
+             [$class: 'StringParameterValue', name: 'service_name', value: "${env.DESTINATION_SERVICE_NAME}"],
+             [$class: 'StringParameterValue', name: 'service_id', value: "${env.DESTINATION_SERVICE_ID}"],
+             [$class: 'StringParameterValue', name: 'terraform_action', value: 'plan'],
+             [$class: 'StringParameterValue', name: 'infra_git_tag', value: "${env.INFRA_GIT_TAG}"],
+             [$class: 'StringParameterValue', name: 'infra_git_branch', value: "${env.INFRA_GIT_BRANCH}"],
+             [$class: 'StringParameterValue', name: 'auto_confirm', value: 'yes'],
+             [$class: 'StringParameterValue', name: 'ami_status', value: 'stable'],
+           ]).number
+		   }
+		  }
+		 }
+		}
+	}
