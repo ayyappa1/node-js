@@ -1,0 +1,21 @@
+---
+common_vars:
+ region_tags:
+   eu-west-1: ew1
+   eu-west-2: ew2
+   eu-west-3: ew3
+   eu-central-1: ec1
+   us-east-2: ue2
+   us-east-1: ue1
+   us-west-1: uw1
+   us-west-2: uw2
+   ap-south-1: aps1
+   ap-northeast-2: apn2
+   ap-northeast-3: apn3
+   ap-southeast-1: aps1
+   ap-southeast-2: aps2
+   ap-northeast-1: apn1
+   ca-central-1: cc1
+   sa-east-1: sae1
+
+ssh_user: jenkins

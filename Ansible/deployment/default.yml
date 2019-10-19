@@ -1,0 +1,41 @@
+---
+- hosts: localhost
+ gather_facts: False
+ vars_prompt:
+   - name: aws_region
+     prompt: "Which region? (eu-west-1, eu-central-1)"
+     private: no
+     default: eu-west-1
+   - name: env_type
+     prompt: "Which Env_Type? (dev, stg,qa,uat)"
+     private: no
+     default: dev
+   - name: service_name
+     prompt: "Which Service Name? (UA,CM)"
+     private: no
+     default: UA
+
+
+ tasks:
+   - name: Set facts for prompt inputs
+     set_fact:
+       aws_region: "{{aws_region}}"
+       env_type: "{{env_type}}"
+       env_name: "{{env_name}}"
+       service_name: "{{service_name}}"
+
+   - name: Set facts for account_name when prod
+     set_fact:
+       account_name: prod
+     when: env_type is defined and env_type == 'live'
+
+   - name: Set facts for account_name when non-prod
+     set_fact:
+       account_name: non-prod
+     when: env_type is defined and env_type != 'live'
+
+   - debug:
+       msg: "{{account_name}}"
+
+ tags:
+   - always

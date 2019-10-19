@@ -1,0 +1,55 @@
+---
+- name: Searching for instances for
+ debug: msg="{{ service_name }}.{{ env_type }}.{{ env_name }} in {{ aws_region }} with ASG count {{ asg_count }}"
+ tags:
+   - always
+
+
+- name: Include platform variables
+ include_vars: "common_vars.yml"
+ tags:
+   - always
+
+- name: Region tag is
+ debug: msg="{{common_vars.region_tags[aws_region]}}"
+ tags:
+   - always
+
+- name: Search for ASG details
+ ec2_asg_facts:
+   tags:
+     Codebase: node-js 
+     Env_Type: "{{ env_type }}"
+     Environment: "{{ env_name }}"
+     Service: "{{ service_name }}"
+   region: "{{ aws_region }}"
+   aws_access_key: "{{ sts_assumed_role.sts_creds.access_key if sts_assumed_role is defined else omit }}"
+   aws_secret_key: "{{ sts_assumed_role.sts_creds.secret_key if sts_assumed_role is defined else omit }}"
+   security_token: "{{ sts_assumed_role.sts_creds.session_token if sts_assumed_role is defined else omit }}"
+ register: asgs
+ tags:
+   - always
+
+- name: Get asg names
+ set_fact:
+   lcs: "{{ asgs.results | map(attribute='auto_scaling_group_name') | list }}"
+ register: asg_ids
+ tags:
+   - always
+
+- name: asg_ids
+ debug: msg="{{ asg_ids }}"
+ tags:
+   - always
+
+- name: update asg with lauch configuration
+ ec2_asg:
+   name: "{{ item }}"
+   min_size: "{{ asg_count }}"
+   max_size: "{{ asg_maxsize }}"
+   desired_capacity: "{{ asg_count }}"
+   region: "{{ aws_region }}"
+   wait_for_instances: false
+ with_items: "{{ asgs.results | map(attribute='auto_scaling_group_name') | list }}"
+ tags:
+   - always

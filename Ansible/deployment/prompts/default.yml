@@ -1,0 +1,27 @@
+---
+
+- import_playbook: prompts/default.yml
+
+- hosts: localhost
+ gather_facts: False
+ vars_prompt:
+   - name: asg_count
+     prompt: "ASG Count - How many ASG EC2 instances? (1)"
+     private: no
+     default: 1
+
+ vars_prompt:
+   - name: asg_maxsize
+     prompt: "ASG max_size - How many ASG EC2 instances? (1)"
+     private: no
+     default: 1
+
+ tasks:
+   - name: Set facts for prompt inputs
+     set_fact:
+       asg_count: "{{asg_count}}"
+       asg_maxsize: "{{asg_maxsize}}"
+
+- hosts: localhost
+ roles:
+   - update_asg
