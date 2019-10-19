@@ -45,8 +45,7 @@ pipeline {
         timestamps {
           script {
             echo 'Starting image build...'
-            sh "cd packer && ./packwrap.sh build -a ${env.AWS_REGION} -s ${env.SERVICE_NAME} -v ${env.APP_VERSION} -u jenkins -g ${env.GIT_BRANCH}"
-            env.AMI_ID = sh (script: "cd packer/post-processors && cat manifest.json | jq -r '.builds | last | .artifact_id | split(\":\") | last'", returnStdout: true).trim()
+            sh "cd packer && ./packer build -a ${env.AWS_REGION} -s ${env.SERVICE_NAME} -v ${env.APP_VERSION} -u jenkins -g ${env.GIT_BRANCH}"
             echo """
 
             AMI info
