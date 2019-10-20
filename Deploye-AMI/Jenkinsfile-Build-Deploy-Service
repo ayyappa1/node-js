@@ -1,0 +1,192 @@
+
+#!/usr/local/bin/groovy
+
+pipeline {
+  agent {
+    label 'devops-jenkins-agent'
+  }
+  parameters {
+
+    // Environment & Bubble
+    choice(choices: "eu-west-1\nus-east-1", description: 'Select an AWS region.', name: 'aws_region')
+    choice(choices: "dev\nstg\nqa\nlive", description: 'Select an environment type.', name: 'env_type')
+    choice(choices: "ua\ncm\nlh", description: 'Select a service name.', name: 'service_name')
+    
+    // Terraform
+    choice(choices: "apply\nplan", description: 'Select the Terraform action to perform.', name: 'terraform_action')
+    string(defaultValue: 'no', description: 'Auto confirm?', name: 'auto_confirm')
+
+    // SCM
+    string(defaultValue: 'develop', description: 'Branch?', name: 'git_branch')
+
+    // AMI
+    string(defaultValue: '*', description: 'AMI ID? To get the latest stable AMI, give the value of *', name: 'ami_id')
+    choice(choices: "stable\nunstable", description: 'AMI Status?', name: 'ami_status')
+    
+    // Stack Size
+    choice(choices: "2\n1", description: 'Select a stack size.', name: 'stack_size')
+  }
+
+  stages {
+    stage('set build label') {
+      steps {
+        script {
+          currentBuild.displayName = "#${env.BUILD_NUMBER} ${params.terraform_action} [${params.git_branch}] ${params.env_type}.${params.service_name}"
+        }
+      }
+    }
+
+    stage('SCM Checkout'){
+		git credentialsId: 'github', 
+		    url: 'https://github.com/javahometech/my-app',
+			branch: "${params.gitBranch}"
+		}
+    stage('set variables') {
+      steps {
+        timestamps {
+          script {
+
+            echo 'Creating AWS variables'
+            if (env.env_type == 'live') {
+              env.AWS_PROFILE = "prod"
+              env.AWS_ACCOUNT_TYPE = "prod"
+              env.AWS_ACCOUNT_ID = "ACCOUNT_ID"
+              env.AWS_ACCOUNT_TAG = "live"
+            } else {
+              env.AWS_PROFILE = "dev"
+              env.AWS_ACCOUNT_TYPE = "non-prod"
+              env.AWS_ACCOUNT_ID = "ACCOUNT_ID"
+              env.AWS_ACCOUNT_TAG = "dev" }
+
+            echo 'Check whether terraform destroy.'
+            if (env.TERRAFORM_ACTION == 'destroy') {
+              env.TERRAFORM_EXTRA_ARG='-destroy' }
+
+            echo 'Setting SCM Variables.'
+            env.GIT_BRANCH = "${params.git_branch}"
+            env.GIT_COMMIT = sh (script: "git rev-parse --verify HEAD", returnStdout: true).trim()
+            env.DEPLOYMENT_USER = "jenkins"
+
+            echo 'Setting environment specific variables.'
+            env.AWS_REGION = "${params.aws_region}"
+            env.SERVICE_NAME = "${params.service_name}"
+            env.ENV_TYPE = "${params.env_type}"
+            
+            echo 'Setting terraform base variables.'
+            env.TERRAFORM_ACTION = "${params.terraform_action}"
+            env.TERRAFORM_EXTRA_ARG = ''
+            env.TERRAFORM_EXTRA_VARS = ''
+            env.SERVICE_DIR = "/node-js/terraform/${params.service_name}"
+
+            echo 'Setting custom AMI IDs. [If provided]'
+            env.AUTH_AMI_ID = "${params.ami_id}"
+
+            if (env.AMI_ID != '') { env.TERRAFORM_EXTRA_VARS+="-var ami_id=${env.AMI_ID} " }
+
+
+            echo 'Setting AMI status requirements.'
+            env.AMI_STATUS = "${params.ami_status}"
+            env.TERRAFORM_EXTRA_VARS+="-var ami_status=${env.AMI_STATUS} "
+          
+            echo 'Setting the ENVIRONMENT variable.'
+            env.ENVIRONMENT = env.SERVICE_NAME
+            if (env.ENV_TYPE == 'dev') { env.ENVIRONMENT = "dev" }
+
+            echo 'Setting the tfvars file name prefix.'
+            if (env.ENV_TYPE == 'live') {
+              env.TFVARS_FILE_NAME_PREFIX = 'prd'
+            } else {
+              env.TFVARS_FILE_NAME_PREFIX = env.AWS_ACCOUNT_TAG
+            }
+          }
+        }
+      }
+    }
+    stage('terraform cleanup') {
+      steps {
+        timestamps {
+          script {
+            echo 'starting terraform cleanup'
+            sh """
+              cd ${env.SERVICE_DIR} && \
+              rm -rf .terraform*
+            """
+          }
+        }
+      }
+    }
+    stage('terraform init') {
+      steps {
+        timestamps {
+          script {
+            echo 'starting terraform init'
+            sh """
+              cd ${env.SERVICE_DIR} && \
+              terraform init -no-color \
+              -backend-config key=${env.ENV_TYPE}.${env.ENVIRONMENT}.${env.AWS_REGION}.tfstate \
+              -backend-config bucket=Node-js-${AWS_ACCOUNT_TYPE}-terraform-statefiles -backend-config dynamodb_table=Node-js-${AWS_ACCOUNT_TYPE}-tf-statelocks
+            """
+          }
+        }
+      }
+    }
+    stage('terraform plan') {
+      steps {
+        timestamps {
+          script {
+            echo 'starting terraform plan'
+            sh """
+              cd ${env.SERVICE_DIR} && \
+              terraform plan ${env.TERRAFORM_EXTRA_ARG} -no-color -input=false -lock=true -lock-timeout=10s -out=./.terraform.plan \
+              -var git_branch="${env.GIT_BRANCH}" \
+              -var git_commit="${env.GIT_COMMIT}" \
+              -var aws_region="${env.AWS_REGION}" \
+              -var env_type="${env.ENV_TYPE}" \
+              -var environment="${env.ENVIRONMENT}" \
+              -var aws_profile="${env.AWS_PROFILE}" \
+              -var aws_account_id="${env.AWS_ACCOUNT_ID}" \
+              -var aws_account_type="${env.AWS_ACCOUNT_TYPE}" \
+              -var deployment_user="${env.DEPLOYMENT_USER}" \
+              -var-file="${env.ENV_TYPE}/values-${env.TFVARS_FILE_NAME_PREFIX}.tfvars" ${env.TERRAFORM_EXTRA_VARS}
+            """
+          }
+        }
+      }
+    }
+    stage('terraform apply action') {
+      when {
+          expression { return env.TERRAFORM_ACTION ==~  /(apply|destroy)/ }
+      }
+      steps {
+        timestamps {
+          script {
+            timeout(time: 1, unit: 'HOURS') {
+              if (env.AUTO_CONFIRM == 'no') { env.TERRAFORM_APPLY_ACTION = input message: "User input required: Do you want to run terraform ${env.TERRAFORM_ACTION}?" }
+              echo "starting terraform ${env.TERRAFORM_ACTION}"
+              sh """
+                cd ${env.SERVICE_DIR} && \
+                terraform apply -no-color \
+                -lock=true -lock-timeout=10s \
+                ./.terraform.plan
+              """
+              echo "finished terraform ${env.TERRAFORM_ACTION}"
+            }
+          }
+        }
+      }
+    }
+    stage('set display info') {
+      when {
+          expression { return env.TERRAFORM_ACTION ==~  /(apply)/ }
+      }
+      steps {
+        timestamps {
+          script {
+            env.TERRAFORM_OUTPUT = sh (script: "  cd ${env.SERVICE_DIR} && terraform output info", returnStdout: true).trim()
+            currentBuild.description = "${env.TERRAFORM_OUTPUT}"
+          }
+        }
+      }
+    }
+  }
+}
